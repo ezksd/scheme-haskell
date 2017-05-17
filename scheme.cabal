@@ -15,7 +15,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Lib, Parser,Scheme,Prims
+  exposed-modules:     Interpreter, Parser,Scheme,Prims
   build-depends:       base >= 4.7 && < 5
                      , transformers
                      , containers

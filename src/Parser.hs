@@ -1,19 +1,23 @@
-module Parser where
+module Parser (parse,parseAll) where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.State.Strict
 import           Data.Char
 import           Scheme
-
 type Parser a = StateT String Maybe a
 
-runParser :: Parser a -> String -> Maybe a
+runParser :: Parser Expr -> String -> Maybe (Expr, String)
 runParser = runStateT
 
-runParse :: Parser a -> String -> Maybe a
-runParse p s =  do (a,b) <- runStateT p s
-                   guard (null b)
-                   return a
+parse :: String -> Maybe Expr
+parse s = do (a,rest) <- runParser expr s
+             guard $ null rest
+             pure a
+
+parseAll :: String -> Maybe [Expr]
+parseAll s = do (a,s1) <- runParser expr s
+                as <- parseAll s1
+                pure (a :as)
 
 item :: Parser Char
 item = do s <- get
@@ -40,9 +44,6 @@ int = do sign <- (char '-' >> pure negate) <|> pure id
          num <- read <$> some (sat isDigit)
          return (sign num)
 
-oneOf :: String -> Parser Char
-oneOf = sat . flip elem
-
 notIn :: String -> Parser Char
 notIn = sat . flip notElem
 
@@ -53,7 +54,7 @@ token = (>>) spaces
 
 symbol :: Parser Expr
 symbol = Symbol <$> s
-    where s = some $ notIn " \r\n\"\'#()"
+    where s = some $ notIn " \r\n\"\'#()."
 
 string :: Parser Expr
 string = String <$> (char '"' *> letter <* char '"')
@@ -67,13 +68,14 @@ bool = Bool <$> (char '#' *> (t <|> f))
           f = char 'f' >> pure False
 
 list :: Parser Expr
-list = List <$> (char '(' *> x <* char ')')
+list = List <$> (char '(' *> x <* (token $ char ')'))
     where x = many $ token expr
 
+pair :: Parser Expr
+pair = Pair <$> left <*> right
+    where left = char '(' *> token expr <* token (char '.')
+          right = token expr <* token (char ')')
+
 expr :: Parser Expr
-expr = string <|> bool <|> number <|> symbol <|> list
-
-parseExpr :: String -> Maybe Expr
-parseExpr = runParse expr
-
+expr = string <|> bool <|> number <|> symbol <|> list <|> pair
 
