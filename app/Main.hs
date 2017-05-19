@@ -1,25 +1,19 @@
 module Main where
-import           Control.Applicative
-import           Control.Monad
-import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Maybe
+
 import           Interpreter
 import           Parser
-import           Scheme
+
 
 main :: IO ()
-main =  void $ runMaybeT(loop env0)
-
-loop :: Env -> MaybeT IO ()
-loop env = do s <- lift getLine
-              guard (not (null s))
-              f s
-    where f s = (do e <- MaybeT(pure (parse s))
-                    (r,env1)  <- MaybeT(pure (eval env e))
-                    lift (print r)
-                    loop env1)
-                <|> loop env
-
-
-
+main = do
+    env <- env0
+    s <- getLine
+    if null s
+        then pure ()
+        else case parse s of
+            Nothing -> main
+            Just expr -> do r <- eval env expr
+                            case r of
+                                Left err -> print err >> main
+                                Right e  -> print e >> main
 

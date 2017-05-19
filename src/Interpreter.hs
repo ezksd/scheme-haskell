@@ -1,86 +1,105 @@
-module Interpreter (eval) where
+{-# OPTIONS_GHC -fno-warn-unused-binds #-}
+module Interpreter (eval,env0) where
 import           Control.Applicative
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.State.Strict
-import qualified Data.Map.Strict                  as Map
-import           Prelude                          hiding (lookup)
+import           Control.Monad.Trans.Except
+import           Control.Monad.Trans.Reader
+import           Data.IORef
+import qualified Data.Map.Strict            as Map
+import           Prelude                    hiding (lookup)
 import           Scheme
 
-type Interpreter a = StateT Env Maybe a
+type Interpreter a = ReaderT Env (ExceptT ScmErr IO) a
 
-eval :: Env -> Expr -> Maybe (Expr,Env)
-eval env e = runStateT (interp e) env
+eval :: Env -> Expr -> IO (Either ScmErr Expr)
+eval env e = runExceptT (runReaderT (interpret e) env)
+
+env0 :: IO Env
+env0 = do
+    a <- newIORef Map.empty
+    return [a]
+
+define :: String -> Expr -> Interpreter ()
+define k v = do
+    (x:_) <- ask
+    m <- liftIO (readIORef x)
+    if Map.member k m
+        then lift (throwE DuplicateDefinition)
+        else do
+            ref <- liftIO (newIORef v)
+            liftIO (modifyIORef' x (Map.insert k ref))
+
 
 lookup :: String -> Interpreter Expr
-lookup k = do e <- get
-              lift (look k e)
-    where look _ []     = Nothing
-          look s (x:xs) = Map.lookup s x <|> look s xs
+lookup k = do
+    (x:xs) <- ask
+    m <- liftIO (readIORef x)
+    case Map.lookup k m of
+        Just e  -> liftIO (readIORef e)
+        Nothing -> if null xs
+            then lift (throwE UnboundIdentifer)
+            else local tail (lookup k)
 
-define :: String -> Expr -> Interpreter Expr
-define k v = do (e:es) <- get
-                guard (not (Map.member k e))
-                put (Map.insert k v e : es)
-                pure nil
--- update target environment with current ant put it to state
-updateEnv :: Env -> Interpreter ()
-updateEnv env = do (_:es) <- get
-                   put (up env es)
-    where   up x'@(x:xs) y = if length x' == length y then y else x : up xs y
+update :: String -> Expr -> Interpreter ()
+update k v = do
+    (x:xs) <- ask
+    m <- liftIO (readIORef x)
+    if Map.member k m
+        then do
+            ref <- liftIO (newIORef v)
+            liftIO (modifyIORef x (Map.adjust (const ref) k))
+        else if (null) xs
+            then lift (throwE UnboundIdentifer)
+            else local tail (update k v)
 
-newEnv :: [String] -> [Expr] -> Interpreter ()
-newEnv keys vals = do
-    env <- get
-    frame <- lift (h keys vals Map.empty)
-    put (frame:env)
-    where   h [] [] frame         = pure frame
-            h (k:ks) (v:vs) frame = do guard $ not $ Map.member k frame
-                                       h ks vs (Map.insert k v frame)
-            h _ _ _               = Nothing
+newFrame :: [String] -> [Expr] -> ExceptT ScmErr IO (IORef Frame)
+newFrame keys vals = do frame <- ins keys vals Map.empty
+                        lift (newIORef frame)
+    where   ins (k:ks) (e:es) frame = do
+                ref <- lift (newIORef e)
+                ins ks es (Map.insert k ref frame)
+            ins [] [] frame = pure frame
+            ins _ _ _ = throwE IllegalType
 
-unSymbols :: [Expr] -> Interpreter [String]
-unSymbols xs = lift (sequence (unSymbol <$> xs))
-    where unSymbol (Symbol s) = Just s
-          unSymbol _          = Nothing
+unSymbols :: [Expr] -> Either ScmErr [String]
+unSymbols ((Symbol x):xs) = (x:) <$> unSymbols xs
+unSymbols []              = pure []
+unSymbols _               = Left IllegalType
 
-{-# ANN interpParams "HLint: ignore" #-}
-interpParams :: [Expr] -> StateT Env Maybe [Expr]
-interpParams []     = pure []
-interpParams (x:xs) = (:) <$> interp x <*> interpParams xs
+interpretAll :: [Expr] -> Interpreter [Expr]
+interpretAll  = sequence . (interpret <$>)
 
-interpBody :: [Expr] -> StateT Env Maybe Expr
-interpBody []     = lift Nothing
-interpBody [x]    = interp x
-interpBody (x:xs) = interp x >> interpBody xs
+--- Readert {runReart :: Env -> ExceptT error io a)}
 
-interp :: Expr -> Interpreter Expr
-interp (Symbol x ) = lookup x
-interp (List x) = case x of
-    [Symbol "define",Symbol k,v] -> interp v >>= define k
-    Symbol "define" : List (Symbol k : params) : body -> do
-        env <- get
-        ps  <- unSymbols params
-        v <- pure (Closure env ps body)
-        define k v
-    Symbol "lambda" : List params : body -> do
-        env <- get
-        ps  <- unSymbols params
+interpret :: Expr -> Interpreter Expr
+interpret (Symbol x) = lookup x
+interpret (List x) = case x of
+    [Symbol "define",Symbol k,v] -> do
+        e <- interpret v
+        define k e
+        pure nil
+    Symbol "define" : List xs : body -> do
+        env <- ask
+        syb <- ReaderT (const (ExceptT (pure (unSymbols xs))))
+        case syb of
+            (f:ps) -> define f (Closure env ps body) >> pure nil
+            _      -> lift (throwE IllegalType)
+    Symbol "lambda" : List xs : body -> do
+        env <- ask
+        ps  <- ReaderT (const (ExceptT (pure (unSymbols xs))))
         pure (Closure env ps body)
     [Symbol "if",p,v1,v2] -> do
-        (Bool b) <- interp p
-        interp (if b then v1 else v2)
-    xs -> do
-        (h:vals) <- interpParams xs
-        case h of
-            (Closure env1 ps body) -> do
-                env <- get
-                put env1
-                newEnv ps vals
-                r <- interpBody body
-                put env
-                pure r
-            (Func f) -> lift (f vals)
-            _ -> lift Nothing
-interp x = pure x
-
+        (Bool b) <- interpret p
+        interpret (if b then v1 else v2)
+    apply -> do
+       xs <- interpretAll apply
+       case xs of
+           ((Closure env ps body):params) -> do
+               frame <- ReaderT (const (newFrame ps params))
+               rs<- local (const (frame:env)) (interpretAll body)
+               case rs of
+                   [] -> lift (throwE IllegalType)
+                   zs -> pure (last zs)
+interpret x = pure x
