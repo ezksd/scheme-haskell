@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-unused-binds #-}
-module Interpreter (eval,env0) where
+module Interpreter (eval,getEnv) where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -13,13 +13,11 @@ import           Scheme
 
 type Interpreter a = ReaderT Env (ExceptT ScmErr IO) a
 
-eval :: Env -> Expr -> IO (Either ScmErr Expr)
-eval env e = runExceptT (runReaderT (interpret e) env)
+eval :: Env -> Expr -> ExceptT ScmErr IO Expr
+eval env e = runReaderT (interpret e) env
 
-env0 :: IO Env
-env0 = do
-    a <- newIORef Map.empty
-    return [a]
+getEnv :: IO Env
+getEnv = newIORef Map.empty >>= (return . pure)
 
 define :: String -> Expr -> Interpreter ()
 define k v = do
@@ -102,4 +100,5 @@ interpret (List x) = case x of
                case rs of
                    [] -> lift (throwE IllegalType)
                    zs -> pure (last zs)
+           _ -> lift (throwE IllegalType)
 interpret x = pure x

@@ -9,10 +9,14 @@ type Parser a = StateT String Maybe a
 runParser :: Parser Expr -> String -> Maybe (Expr, String)
 runParser = runStateT
 
-parse :: String -> Maybe Expr
-parse s = do (a,rest) <- runParser expr s
-             guard $ null rest
-             pure a
+parse :: String -> Either ScmErr Expr
+parse s = convert $ do (a,rest) <- runParser expr s
+                       guard $ null rest
+                       pure a
+    where convert m = case m of
+                        Just x  -> pure x
+                        Nothing -> Left ParseError
+
 
 parseAll :: String -> Maybe [Expr]
 parseAll s = do (a,s1) <- runParser expr s
