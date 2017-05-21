@@ -41,7 +41,7 @@ char :: Char -> Parser Char
 char = sat . (==)
 
 letter :: Parser String
-letter = some (sat isAlpha)
+letter = many (sat isAlpha)
 
 int :: Parser Int
 int = do sign <- (char '-' >> pure negate) <|> pure id
@@ -80,6 +80,9 @@ pair = Pair <$> left <*> right
     where left = char '(' *> token expr <* token (char '.')
           right = token expr <* token (char ')')
 
+quote :: Parser Expr
+quote = (\e -> List [Symbol "quote",e]) <$> (char '\'' *> expr)
+
 expr :: Parser Expr
-expr = string <|> bool <|> number <|> symbol <|> list <|> pair
+expr = string <|> bool <|> number <|> symbol <|> list <|> pair <|> quote
 

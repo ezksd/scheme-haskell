@@ -11,7 +11,6 @@ main = getEnv >>= loop ""
 putAndFlush :: String -> IO ()
 putAndFlush s = putStr s >> hFlush stdout
 
-
 loop :: String -> Env -> IO ()
 loop s env = do s1 <- getLine
                 if s1 == "exit"

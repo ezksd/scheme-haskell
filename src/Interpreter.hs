@@ -9,33 +9,41 @@ import           Control.Monad.Trans.Reader
 import           Data.IORef
 import qualified Data.Map.Strict            as Map
 import           Prelude                    hiding (lookup)
+import           Prims
 import           Scheme
 
 type Interpreter a = ReaderT Env (ExceptT ScmErr IO) a
 
 eval :: Env -> Expr -> ExceptT ScmErr IO Expr
-eval env e = runReaderT (interpret e) env
+eval env e = do ref <- runReaderT (interpret e) env
+                expr <- lift (readIORef ref)
+                pure expr
 
 getEnv :: IO Env
-getEnv = newIORef Map.empty >>= (return . pure)
+getEnv = do prims <- primitives
+            frame <- newIORef (Map.fromList prims)
+            return [frame]
+-- getEnv = newIORef (Map.fromList primitives) >>= (return . pure)
 
-define :: String -> Expr -> Interpreter ()
+nil :: IO (IORef Expr)
+nil = newIORef (List [])
+
+define :: String -> (IORef Expr) -> Interpreter ()
 define k v = do
     (x:_) <- ask
     m <- liftIO (readIORef x)
     if Map.member k m
         then lift (throwE DuplicateDefinition)
         else do
-            ref <- liftIO (newIORef v)
-            liftIO (modifyIORef' x (Map.insert k ref))
+            liftIO (modifyIORef' x (Map.insert k v))
 
 
-lookup :: String -> Interpreter Expr
+lookup :: String -> Interpreter (IORef Expr)
 lookup k = do
     (x:xs) <- ask
     m <- liftIO (readIORef x)
     case Map.lookup k m of
-        Just e  -> liftIO (readIORef e)
+        Just e  -> pure e
         Nothing -> if null xs
             then lift (throwE UnboundIdentifer)
             else local tail (lookup k)
@@ -44,20 +52,18 @@ update :: String -> Expr -> Interpreter ()
 update k v = do
     (x:xs) <- ask
     m <- liftIO (readIORef x)
-    if Map.member k m
-        then do
-            ref <- liftIO (newIORef v)
-            liftIO (modifyIORef x (Map.adjust (const ref) k))
-        else if (null) xs
+    case Map.lookup k m of
+        Just ref  -> liftIO (writeIORef ref v)
+        Nothing -> if null xs
             then lift (throwE UnboundIdentifer)
             else local tail (update k v)
 
-newFrame :: [String] -> [Expr] -> ExceptT ScmErr IO (IORef Frame)
+
+newFrame :: [String] -> [IORef Expr] -> ExceptT ScmErr IO (IORef Frame)
 newFrame keys vals = do frame <- ins keys vals Map.empty
                         lift (newIORef frame)
-    where   ins (k:ks) (e:es) frame = do
-                ref <- lift (newIORef e)
-                ins ks es (Map.insert k ref frame)
+    where   ins (k:ks) (v:vs) frame = do
+                ins ks vs (Map.insert k v frame)
             ins [] [] frame = pure frame
             ins _ _ _ = throwE IllegalType
 
@@ -66,39 +72,62 @@ unSymbols ((Symbol x):xs) = (x:) <$> unSymbols xs
 unSymbols []              = pure []
 unSymbols _               = Left IllegalType
 
-interpretAll :: [Expr] -> Interpreter [Expr]
+interpretAll :: [Expr] -> Interpreter [IORef Expr]
 interpretAll  = sequence . (interpret <$>)
 
---- Readert {runReart :: Env -> ExceptT error io a)}
 
-interpret :: Expr -> Interpreter Expr
+interpret :: Expr -> Interpreter (IORef Expr)
 interpret (Symbol x) = lookup x
 interpret (List x) = case x of
     [Symbol "define",Symbol k,v] -> do
         e <- interpret v
         define k e
-        pure nil
+        liftIO nil
+    [Symbol "set!",Symbol k,v] -> do
+        ref <- interpret v
+        e   <- liftIO (readIORef ref)
+        update k e
+        liftIO nil
     Symbol "define" : List xs : body -> do
         env <- ask
         syb <- ReaderT (const (ExceptT (pure (unSymbols xs))))
         case syb of
-            (f:ps) -> define f (Closure env ps body) >> pure nil
+            (f:ps) -> do
+                ref <- liftIO (newIORef (Closure env ps body))
+                define f ref
+                liftIO nil
             _      -> lift (throwE IllegalType)
     Symbol "lambda" : List xs : body -> do
         env <- ask
         ps  <- ReaderT (const (ExceptT (pure (unSymbols xs))))
-        pure (Closure env ps body)
+        liftIO (newIORef (Closure env ps body))
+    [Symbol "quote",e] -> liftIO (newIORef e)
     [Symbol "if",p,v1,v2] -> do
-        (Bool b) <- interpret p
-        interpret (if b then v1 else v2)
+        ref <- interpret p
+        expr <- liftIO (readIORef ref)
+        case expr of
+            Bool b ->  interpret (if b then v1 else v2)
+            _      -> lift (throwE IllegalType)
+    Symbol "eq?":xs -> case xs of
+        [Symbol a,Symbol b] -> do aref <- lookup a
+                                  bref <- lookup b
+                                  liftIO (newIORef (Bool (aref == bref)))
+        _ -> liftIO (newIORef  (Bool False))
     apply -> do
        xs <- interpretAll apply
        case xs of
-           ((Closure env ps body):params) -> do
-               frame <- ReaderT (const (newFrame ps params))
-               rs<- local (const (frame:env)) (interpretAll body)
-               case rs of
-                   [] -> lift (throwE IllegalType)
-                   zs -> pure (last zs)
+           (h:params) -> do
+               v <- liftIO (readIORef h)
+               case v of
+                   (Closure env ps body) -> do
+                        frame <- ReaderT (const (newFrame ps params))
+                        rs <- local (const (frame:env)) (interpretAll body)
+                        case rs of
+                            [] -> lift (throwE IllegalType)
+                            zs -> pure (last zs)
+                   (Func f) -> do
+                       r <- ReaderT (const (f params))
+                       liftIO (newIORef r)
+                   _ -> lift (throwE IllegalType)
            _ -> lift (throwE IllegalType)
-interpret x = pure x
+interpret x = liftIO (newIORef x)
