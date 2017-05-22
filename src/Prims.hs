@@ -1,4 +1,4 @@
-module Prims (primitives) where
+module Prims (primitives,unRefs) where
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Data.IORef
@@ -27,10 +27,16 @@ binaryOp op = wrap (\xs -> case xs of
     [a,b] -> op a b
     _     -> Left "paramters not match" )
 
-unBools :: [Expr] -> Either ScmErr [Bool]
-unBools []          = pure []
-unBools (Bool b:xs) = (b:) <$> unBools xs
-unBools _           = Left "bot boolean type"
+and':: [Expr] -> Either ScmErr Expr
+and' []          = pure (Bool True)
+and' (Bool b:xs) = if b then and' xs else pure (Bool False)
+and' _           = Left "bot boolean type"
+
+or':: [Expr] -> Either ScmErr Expr
+or' []          = pure (Bool True)
+or' (Bool b:xs) = if b then pure(Bool True) else or' xs
+or' _           = Left "bot boolean type"
+
 
 primitives :: IO [(String,IORef Expr)]
 primitives = trans [("+", caculate (+)),
@@ -59,8 +65,11 @@ primitives = trans [("+", caculate (+)),
                     ("cons",binaryOp(\a b -> case b of
                         List bs -> pure (List (a:bs))
                         _       -> pure (Pair a b))),
-                    ("and",wrap(((Bool . and) <$>) . unBools)),
-                    ("or",wrap(((Bool . or) <$>) . unBools)),
+                    ("and",wrap(and')),
+                    ("or",wrap(or')),
+                    ("not", unaryOp (\x -> case x of
+                        Bool b -> pure (Bool (not b))
+                        _      -> Left "not boolean type")),
                     ("display",(\xs -> do
                         as <-  lift (unRefs xs)
                         case as of

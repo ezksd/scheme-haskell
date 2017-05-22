@@ -3,26 +3,25 @@ import           Control.Monad
 import           Control.Monad.Trans.Except
 import           Interpreter
 import           Scheme
-import           System.IO
+
+-- main :: IO ()
+-- main = getEnv >>= loop ""
 
 main :: IO ()
-main = getEnv >>= loop ""
+main = getInterpreter >>= loop ""
 
-putAndFlush :: String -> IO ()
-putAndFlush s = putStr s >> hFlush stdout
-
-loop :: String -> Env -> IO ()
-loop s env = do s1 <- getLine
-                if s1 == "exit"
+loop :: String -> (String -> ExceptT ScmErr IO [Expr]) -> IO ()
+loop s interp = do  s1 <- getLine
+                    if s1 == "exit"
                     then pure ()
                     else let s2 = s ++ s1
-                         in if check s2
-                             then evalAndPrint s2 >> loop "" env
-                             else loop s2 env
-    where run = runExceptT . (evalAll env)
+                        in if check s2
+                            then go s2 >> loop "" interp
+                            else loop s2 interp
+    where run = runExceptT . interp
           printAll = void . sequence . (print <$>)
           printResult = either print printAll
-          evalAndPrint  = ( >>= printResult) . run
+          go = (>>= printResult) . run
 
 count :: Int -> String -> Int
 count c [] = c
