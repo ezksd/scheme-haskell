@@ -3,9 +3,7 @@ import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Data.IORef
 import           Scheme
--- type IFunc = [IORef Expr] ->  ExceptT ScmErr IO Expr
--- type Frame = Map.Map String (IORef Expr)
--- type Env = [IORef Frame]
+
 unRefs :: [IORef a] -> IO [a]
 unRefs []     = pure []
 unRefs (x:xs) = (:) <$> readIORef x <*> unRefs xs
@@ -14,28 +12,25 @@ wrap :: ([Expr] -> Either ScmErr Expr) -> IFunc
 wrap f refs = do ps <- lift (unRefs refs)
                  ExceptT (pure (f ps))
 
-
 numericOp :: (Int -> Int -> Expr) -> IFunc
 numericOp op = wrap (\xs -> case xs of
     [Number a , Number b] -> pure (op a b)
-    _                     -> Left ParametersNotMatch)
-
-caculate :: (Int -> Int -> Int) -> IFunc
-caculate op = numericOp (\a b -> Number (op a b))
-
-comp :: (Int -> Int -> Bool) -> IFunc
-comp op =  numericOp (\a b -> Bool (op a b))
-
+    _                     -> Left "paramters not match")
 
 unaryOp :: (Expr -> Either ScmErr Expr) -> IFunc
 unaryOp op = wrap (\xs -> case xs of
     [x] ->  op x
-    _   -> Left ParametersNotMatch)
+    _   -> Left "paramters not match")
 
 binaryOp :: (Expr -> Expr -> Either ScmErr Expr) -> IFunc
 binaryOp op = wrap (\xs -> case xs of
     [a,b] -> op a b
-    _     -> Left ParametersNotMatch )
+    _     -> Left "paramters not match" )
+
+unBools :: [Expr] -> Either ScmErr [Bool]
+unBools []          = pure []
+unBools (Bool b:xs) = (b:) <$> unBools xs
+unBools _           = Left "bot boolean type"
 
 primitives :: IO [(String,IORef Expr)]
 primitives = trans [("+", caculate (+)),
@@ -56,28 +51,33 @@ primitives = trans [("+", caculate (+)),
                     ("car",unaryOp (\x -> case x of
                         List (a:_) -> pure a
                         Pair a _   -> pure a
-                        _          -> Left IllegalType)),
+                        _          -> Left "not a pair/list")),
                     ("cdr", unaryOp (\x -> case x of
                         List (_:b) -> pure (List b)
                         Pair _ b   -> pure b
-                        _          -> Left IllegalType)),
+                        _          -> Left "not a pair/list")),
                     ("cons",binaryOp(\a b -> case b of
                         List bs -> pure (List (a:bs))
                         _       -> pure (Pair a b))),
+                    ("and",wrap(((Bool . and) <$>) . unBools)),
+                    ("or",wrap(((Bool . or) <$>) . unBools)),
                     ("display",(\xs -> do
                         as <-  lift (unRefs xs)
                         case as of
                             [x] -> lift (putStrLn (show x)) >> pure (List [])
-                            _   -> throwE ParametersNotMatch)),
+                            _   -> throwE "parameters not match")),
                     ("newline",(\xs -> do
                         as <- lift (unRefs xs)
                         case as of
                             [] -> lift (putStr "\n") >> pure (List [])
-                            _  -> throwE IllegalType))]
+                            _  -> throwE "parameters not match"))]
+    where caculate op = numericOp (\a b -> Number (op a b))
+          comp op =  numericOp (\a b -> Bool (op a b))
+          trans [] = pure []
+          trans ((k,v):xs) = do ref <- newIORef (Func v)
+                                t  <-  trans xs
+                                pure ((k,ref):t)
 
-trans :: [(String,IFunc)] -> IO [(String,IORef Expr)]
-trans [] = pure []
-trans ((k,v):xs) = do ref <- newIORef (Func v)
-                      t  <-  trans xs
-                      pure ((k,ref):t)
+
+
 

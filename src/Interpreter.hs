@@ -1,133 +1,103 @@
 {-# OPTIONS_GHC -fno-warn-unused-binds #-}
-module Interpreter (eval,getEnv) where
+module Interpreter (eval,evalAll,getEnv) where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
+import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Reader
 import           Data.IORef
 import qualified Data.Map.Strict            as Map
+import           Parser
 import           Prelude                    hiding (lookup)
 import           Prims
 import           Scheme
 
+
 type Interpreter a = ReaderT Env (ExceptT ScmErr IO) a
 
-eval :: Env -> Expr -> ExceptT ScmErr IO Expr
-eval env e = do ref <- runReaderT (interpret e) env
-                expr <- lift (readIORef ref)
-                pure expr
+
+eval :: Env -> String -> ExceptT ScmErr IO Expr
+eval env s = runReaderT (parse' s >>= interpret) env >>= (lift . readIORef)
+    where parse' = ReaderT . const . ExceptT . pure .parse
+
+evalAll :: Env -> String -> ExceptT ScmErr IO [Expr]
+evalAll env s = runReaderT (parseAll' s >>= intepretAll) env  >>= (lift . unRefs)
+    where parseAll' = ReaderT . const . ExceptT . pure . parseAll
+          intepretAll = sequence . (interpret <$>)
+
+unRefs :: [IORef a] -> IO [a]
+unRefs []     = pure []
+unRefs (x:xs) = (:) <$> readIORef x <*> unRefs xs
+-- parse' :: String -> Interpreter Expr
+-- parse' s= ReaderT (const (ExceptT pure(parse s)))
+
+-- eval :: Env -> Expr -> ExceptT ScmErr IO Expr
+-- eval env e = runReaderT (interpret e) env >>= (lift . readIORef)
+
+-- evalAll :: Env -> [Expr] -> ExceptT ScmErr IO [Expr]
+-- evalAll env x  = sequence (eval env <$> x)
 
 getEnv :: IO Env
-getEnv = do prims <- primitives
-            frame <- newIORef (Map.fromList prims)
-            return [frame]
--- getEnv = newIORef (Map.fromList primitives) >>= (return . pure)
+getEnv = primitives >>= (newIORef . Map.fromList) >>= (pure . pure)
 
-nil :: IO (IORef Expr)
-nil = newIORef (List [])
+nil :: Expr
+nil = List []
 
-define :: String -> (IORef Expr) -> Interpreter ()
-define k v = do
-    (x:_) <- ask
-    m <- liftIO (readIORef x)
-    if Map.member k m
-        then lift (throwE DuplicateDefinition)
-        else do
-            liftIO (modifyIORef' x (Map.insert k v))
+throw :: ScmErr -> Interpreter (IORef Expr)
+throw = lift . throwE
 
+define :: String -> (IORef Expr) -> Interpreter (IORef Expr)
+define k v = asks head >>=  (liftIO . runMaybeT . def) >>= maybe (throw ("unboude identifer :" ++ k)) pure
+    where def ref' = lift (readIORef ref') >>= (guard . not . Map.member k)
+                   >> lift (modifyIORef' ref' (Map.insert k v ) >> (newIORef nil))
 
 lookup :: String -> Interpreter (IORef Expr)
-lookup k = do
-    (x:xs) <- ask
-    m <- liftIO (readIORef x)
-    case Map.lookup k m of
-        Just e  -> pure e
-        Nothing -> if null xs
-            then lift (throwE UnboundIdentifer)
-            else local tail (lookup k)
+lookup k = ask >>= (liftIO . runMaybeT . lk) >>= maybe (throw ("unboude identifer :" ++ k)) pure
+    where lk []     = MaybeT (pure Nothing)
+          lk (x:xs) = (lift (readIORef x) >>= (MaybeT . pure . (Map.lookup k))) <|> lk xs
 
-update :: String -> Expr -> Interpreter ()
-update k v = do
-    (x:xs) <- ask
-    m <- liftIO (readIORef x)
-    case Map.lookup k m of
-        Just ref  -> liftIO (writeIORef ref v)
-        Nothing -> if null xs
-            then lift (throwE UnboundIdentifer)
-            else local tail (update k v)
+update :: String -> (IORef Expr) -> Interpreter (IORef Expr)
+update k v = ask >>= (liftIO . runMaybeT . up) >>= maybe (throw ("unboude identifer :" ++ k)) pure
+    where up [] = MaybeT (pure Nothing)
+          up (x:xs) = (lift (readIORef x) >>= (guard . (Map.member k)) >>
+            lift (modifyIORef' x (Map.adjust (const v) k) >>
+            newIORef nil)) <|> up xs
 
-
-newFrame :: [String] -> [IORef Expr] -> ExceptT ScmErr IO (IORef Frame)
-newFrame keys vals = do frame <- ins keys vals Map.empty
-                        lift (newIORef frame)
-    where   ins (k:ks) (v:vs) frame = do
-                ins ks vs (Map.insert k v frame)
-            ins [] [] frame = pure frame
-            ins _ _ _ = throwE IllegalType
-
-unSymbols :: [Expr] -> Either ScmErr [String]
-unSymbols ((Symbol x):xs) = (x:) <$> unSymbols xs
-unSymbols []              = pure []
-unSymbols _               = Left IllegalType
-
-interpretAll :: [Expr] -> Interpreter [IORef Expr]
-interpretAll  = sequence . (interpret <$>)
-
+newEnv :: [String] -> [IORef Expr] -> Env ->  Interpreter Env
+newEnv keys vals env = (:env) <$> (ins keys vals Map.empty >>= (liftIO . newIORef))
+    where   ins (k:ks) (v:vs) frame = ins ks vs (Map.insert k v frame)
+            ins [] [] frame         = pure frame
+            ins _ _ _               = lift (throwE "parameters not match")
 
 interpret :: Expr -> Interpreter (IORef Expr)
 interpret (Symbol x) = lookup x
 interpret (List x) = case x of
-    [Symbol "define",Symbol k,v] -> do
-        e <- interpret v
-        define k e
-        liftIO nil
-    [Symbol "set!",Symbol k,v] -> do
-        ref <- interpret v
-        e   <- liftIO (readIORef ref)
-        update k e
-        liftIO nil
-    Symbol "define" : List xs : body -> do
-        env <- ask
-        syb <- ReaderT (const (ExceptT (pure (unSymbols xs))))
-        case syb of
-            (f:ps) -> do
-                ref <- liftIO (newIORef (Closure env ps body))
-                define f ref
-                liftIO nil
-            _      -> lift (throwE IllegalType)
-    Symbol "lambda" : List xs : body -> do
-        env <- ask
-        ps  <- ReaderT (const (ExceptT (pure (unSymbols xs))))
-        liftIO (newIORef (Closure env ps body))
+    Symbol "define" : List (Symbol f : xs) : body -> makeClosuer body xs ask >>= define f
+    Symbol "lambda" : List xs : body -> makeClosuer body xs ask
+    [Symbol "define",Symbol k,v] -> interpret v >>= define k
+    [Symbol "set!",Symbol k,v] -> interpret v >>= update k
     [Symbol "quote",e] -> liftIO (newIORef e)
+    [Symbol "eq?",Symbol a,Symbol b] -> (==) <$> lookup a <*> lookup b >>= (liftIO . newIORef . Bool)
     [Symbol "if",p,v1,v2] -> do
-        ref <- interpret p
-        expr <- liftIO (readIORef ref)
+        expr <- interpret p >>= (liftIO . readIORef)
         case expr of
-            Bool b ->  interpret (if b then v1 else v2)
-            _      -> lift (throwE IllegalType)
-    Symbol "eq?":xs -> case xs of
-        [Symbol a,Symbol b] -> do aref <- lookup a
-                                  bref <- lookup b
-                                  liftIO (newIORef (Bool (aref == bref)))
-        _ -> liftIO (newIORef  (Bool False))
-    apply -> do
-       xs <- interpretAll apply
-       case xs of
-           (h:params) -> do
-               v <- liftIO (readIORef h)
-               case v of
-                   (Closure env ps body) -> do
-                        frame <- ReaderT (const (newFrame ps params))
-                        rs <- local (const (frame:env)) (interpretAll body)
-                        case rs of
-                            [] -> lift (throwE IllegalType)
-                            zs -> pure (last zs)
-                   (Func f) -> do
-                       r <- ReaderT (const (f params))
-                       liftIO (newIORef r)
-                   _ -> lift (throwE IllegalType)
-           _ -> lift (throwE IllegalType)
+            Bool b -> interpret (if b then v1 else v2)
+            _      -> lift (throwE "parameters not match")
+    (f:xs) -> do
+        h <- interpret f >>= (liftIO . readIORef)
+        params <- interpretAll xs
+        case h of
+            (Closure body ps env) -> newEnv ps params env >>= ((`local` interpretBody body) . const)
+            (Func func) -> ReaderT (const (func params)) >>= (liftIO . newIORef)
+            _ -> lift (throwE "not a function")
+    _ -> lift (throwE "illegal expression")
+    where interpretAll  = sequence . (interpret <$>)
+          interpretBody []  = throw "empty function body"
+          interpretBody xs' = last <$> interpretAll xs'
+          unSymbols ((Symbol x'):xs) = (x':) <$> unSymbols xs
+          unSymbols []               = pure []
+          unSymbols _                = lift (throwE "illegal type")
+          makeClosuer body xs = (>>= (liftIO . newIORef)) . ((Closure body) <$> unSymbols xs <*>)
 interpret x = liftIO (newIORef x)

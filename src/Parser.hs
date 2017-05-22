@@ -6,22 +6,13 @@ import           Data.Char
 import           Scheme
 type Parser a = StateT String Maybe a
 
-runParser :: Parser Expr -> String -> Maybe (Expr, String)
-runParser = runStateT
-
 parse :: String -> Either ScmErr Expr
-parse s = convert $ do (a,rest) <- runParser expr s
-                       guard $ null rest
-                       pure a
-    where convert m = case m of
-                        Just x  -> pure x
-                        Nothing -> Left ParseError
+parse s =  maybe (Left "parse error...") pure (do (a,rest) <- runStateT expr s
+                                                  guard $ null rest
+                                                  pure a)
 
-
-parseAll :: String -> Maybe [Expr]
-parseAll s = do (a,s1) <- runParser expr s
-                as <- parseAll s1
-                pure (a :as)
+parseAll :: String -> Either ScmErr [Expr]
+parseAll s = maybe (Left "parse error...") pure (runStateT (some (token expr)) s >>= (pure . fst))
 
 item :: Parser Char
 item = do s <- get

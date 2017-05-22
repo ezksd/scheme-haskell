@@ -10,15 +10,10 @@ data Expr = Symbol String
           | Bool Bool
           | List [Expr]
           | Pair Expr Expr
-          | Closure Env [String] [Expr]
+          | Closure [Expr] [String] Env
           | Func IFunc
 
-data ScmErr = ParseError
-            | IllegalType
-            | UnboundIdentifer
-            | DuplicateDefinition
-            | ParametersNotMatch
-            deriving (Show)
+type ScmErr = String
 
 instance Show Expr where
     show (Symbol s) = "variable:" ++ s
