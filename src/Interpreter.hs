@@ -33,7 +33,8 @@ evalAll env s = runReaderT (parseAll' s >>= interpretAll) env  >>= (lift . unRef
     where parseAll' = ReaderT . const . ExceptT . pure . parseAll
 
 getEnv :: IO Env
-getEnv = primitives >>= (newIORef . Map.fromList) >>= (pure . pure)
+-- getEnv = primitives >>= (newIORef . Map.fromList) >>= (pure . pure)
+getEnv = pure <$> (primitives >>= (newIORef . Map.fromList))
 
 
 nil :: Expr

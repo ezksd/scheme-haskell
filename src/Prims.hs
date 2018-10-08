@@ -42,7 +42,7 @@ primitives :: IO [(String,IORef Expr)]
 primitives = trans [("+", caculate (+)),
                     ("-", caculate (-)),
                     ("*", caculate (*)),
-                    ("/", caculate (div)),
+                    ("/", caculate div),
                     (">", comp (>)),
                     ("=", comp (==)),
                     ("<", comp (<)),
@@ -65,16 +65,16 @@ primitives = trans [("+", caculate (+)),
                     ("cons",binaryOp(\a b -> case b of
                         List bs -> pure (List (a:bs))
                         _       -> pure (Pair a b))),
-                    ("and",wrap(and')),
-                    ("or",wrap(or')),
+                    ("and",wrap and'),
+                    ("or",wrap or'),
                     ("not", unaryOp (\x -> case x of
                         Bool b -> pure (Bool (not b))
                         _      -> Left "not boolean type")),
-                    ("display",(\xs -> do
+                    ("display",\xs -> do
                         as <-  lift (unRefs xs)
                         case as of
-                            [x] -> lift (putStrLn (show x)) >> pure (List [])
-                            _   -> throwE "parameters not match")),
+                            [x] -> lift (print x) >> pure (List [])
+                            _   -> throwE "parameters not match"),
                     ("newline",(\xs -> do
                         as <- lift (unRefs xs)
                         case as of

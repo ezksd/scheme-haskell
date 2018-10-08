@@ -25,7 +25,7 @@ instance Show Expr where
               f [x]    = show x ++ ")"
               f (x:xs) = show x ++ "," ++ f xs
     show (Pair a b) = "(" ++ show a ++ " . " ++ show b ++")"
-    show (Closure{}) = "function"
+    show Closure{} = "function"
     show (Func _) = "primitive"
 
 type IFunc = [IORef Expr] ->  ExceptT ScmErr IO Expr
