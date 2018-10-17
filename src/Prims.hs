@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 module Prims (primitives,unRefs) where
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
@@ -13,17 +14,17 @@ wrap f refs = do ps <- lift (unRefs refs)
                  ExceptT (pure (f ps))
 
 numericOp :: (Int -> Int -> Expr) -> IFunc
-numericOp op = wrap (\xs -> case xs of
+numericOp op = wrap (\case
     [Number a , Number b] -> pure (op a b)
     _                     -> Left "paramters not match")
 
 unaryOp :: (Expr -> Either ScmErr Expr) -> IFunc
-unaryOp op = wrap (\xs -> case xs of
+unaryOp op = wrap (\case
     [x] ->  op x
     _   -> Left "paramters not match")
 
 binaryOp :: (Expr -> Expr -> Either ScmErr Expr) -> IFunc
-binaryOp op = wrap (\xs -> case xs of
+binaryOp op = wrap (\case
     [a,b] -> op a b
     _     -> Left "paramters not match" )
 
@@ -46,19 +47,19 @@ primitives = trans [("+", caculate (+)),
                     (">", comp (>)),
                     ("=", comp (==)),
                     ("<", comp (<)),
-                    ("list?", unaryOp (\x -> case x of
+                    ("list?", unaryOp (\case
                         List _ -> pure (Bool True)
                         _      -> pure (Bool False))),
-                    ("pair?", unaryOp (\x -> case x of
+                    ("pair?", unaryOp (\case
                         Pair _ _ -> pure (Bool True))),
-                    ("null?", unaryOp (\x -> case x of
+                    ("null?", unaryOp (\case
                         List [] -> pure (Bool True)
                         _       -> pure (Bool False))),
-                    ("car",unaryOp (\x -> case x of
+                    ("car",unaryOp (\case
                         List (a:_) -> pure a
                         Pair a _   -> pure a
                         _          -> Left "not a pair/list")),
-                    ("cdr", unaryOp (\x -> case x of
+                    ("cdr", unaryOp (\case
                         List (_:b) -> pure (List b)
                         Pair _ b   -> pure b
                         _          -> Left "not a pair/list")),

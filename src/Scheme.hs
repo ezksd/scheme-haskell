@@ -1,8 +1,10 @@
 module Scheme where
 import           Control.Monad.Trans.Except
 import           Data.IORef
-import qualified Data.Map.Strict            as Map
-import           Prelude                    hiding (init, lookup)
+import qualified Data.Map.Strict               as Map
+import           Prelude                 hiding ( init
+                                                , lookup
+                                                )
 
 data Expr = Symbol String
           | String String
