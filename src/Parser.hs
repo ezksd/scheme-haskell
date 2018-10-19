@@ -6,39 +6,33 @@ where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.State.Strict
+-- import           Control.Monad.Trans.Except
+
 import           Data.Char
 import           Scheme
 type Parser a = StateT String Maybe a
+-- type Parser a = StateT String (ExceptT String) a
+
+expr' :: Parser Expr
+expr' = expr <* (get >>= guard . null)
 
 parse :: String -> Either ScmErr Expr
-parse s = maybe
-    (Left "parse error...")
-    pure
-    (do
-        (a, rest) <- runStateT expr s
-        guard $ null rest
-        pure a
-    )
+parse = maybe (Left "parse error...") pure . evalStateT expr'
 
 parseAll :: String -> Either ScmErr [Expr]
-parseAll s =
-    maybe (Left "parse error...") pure (fst <$> runStateT (some (token expr)) s)
+parseAll = maybe (Left "parse error...") pure . evalStateT (some (token expr'))
 
 item :: Parser Char
 item = do
-    s <- get
-    guard (not (null s))
-    put (tail s)
-    return (head s)
+    (x : xs) <- get
+    put xs
+    return x
 
-test :: Parser a -> (a -> Bool) -> Parser a
-test m p = do
-    a <- m
-    guard (p a)
-    return a
+test' :: (a -> Bool) -> Parser a -> Parser a
+test' = mfilter
 
 sat :: (Char -> Bool) -> Parser Char
-sat = test item
+sat = flip test' item
 
 char :: Char -> Parser Char
 char = sat . (==)
@@ -47,17 +41,14 @@ letter :: Parser String
 letter = many (sat isAlpha)
 
 int :: Parser Int
-int = do
-    sign <- (char '-' >> pure negate) <|> pure id
-    num  <- read <$> some (sat isDigit)
-    return (sign num)
+int = negate <$> (char '-' >> nat) <|> nat
+    where nat = read <$> some (sat isDigit)
 
 notIn :: String -> Parser Char
 notIn = sat . flip notElem
 
 token :: Parser a -> Parser a
 token = (>>) spaces where spaces = many $ sat isSpace
-
 
 symbol :: Parser Expr
 symbol = Symbol <$> s where s = some $ notIn " \r\n\"\'#()."
@@ -75,7 +66,7 @@ bool = Bool <$> (char '#' *> (t <|> f))
     f = char 'f' >> pure False
 
 list :: Parser Expr
-list = List <$> (char '(' *> x <* (token $ char ')'))
+list = List <$> (char '(' *> x <* token (char ')'))
     where x = many $ token expr
 
 pair :: Parser Expr

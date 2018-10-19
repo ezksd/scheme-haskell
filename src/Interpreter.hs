@@ -64,9 +64,9 @@ lookup k =
         >>= (liftIO . runMaybeT . lk)
         >>= maybe (throw ("unboude identifer :" ++ k)) pure
   where
-    lk [] = MaybeT (pure Nothing)
-    lk (x : xs) =
-        (lift (readIORef x) >>= (MaybeT . pure . Map.lookup k)) <|> lk xs
+    lk = foldr
+        (\x -> (<|>) (lift (readIORef x) >>= (MaybeT . pure . Map.lookup k)))
+        (MaybeT (pure Nothing))
 
 update :: String -> IORef Expr -> Interpreter (IORef Expr)
 update k v =
@@ -74,13 +74,13 @@ update k v =
         >>= (liftIO . runMaybeT . up)
         >>= maybe (throw ("unboude identifer :" ++ k)) pure
   where
-    up [] = MaybeT (pure Nothing)
-    up (x : xs) =
-        (lift (readIORef x) >>= (guard . Map.member k) >> lift
+    up = foldr
+        (\x -> (<|>)
+            (lift (readIORef x) >>= (guard . Map.member k) >> lift
                 (modifyIORef' x (Map.adjust (const v) k) >> newIORef nil)
             )
-            <|> up xs
-
+        )
+        (MaybeT (pure Nothing))
 newEnv :: [String] -> [IORef Expr] -> Env -> Interpreter Env
 newEnv keys vals env =
     (: env) <$> (ins keys vals Map.empty >>= (liftIO . newIORef))

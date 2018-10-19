@@ -31,6 +31,4 @@ count c (x:xs) = count r xs
                 ')' -> c - 1
                 _   -> c
 check :: String -> Bool
-check s = count 0 s == 0 && (not (null s))
-
-
+check s = count 0 s == 0 && not (null s)
