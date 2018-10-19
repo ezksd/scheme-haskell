@@ -6,21 +6,32 @@ where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.State.Strict
--- import           Control.Monad.Trans.Except
+import           Control.Monad.Trans.Except
+import           Control.Monad.Trans.Class
 
 import           Data.Char
 import           Scheme
-type Parser a = StateT String Maybe a
--- type Parser a = StateT String (ExceptT String) a
+-- type Parser a = StateT String Maybe a
+type Parser a = StateT String (ExceptT String IO) a
 
-expr' :: Parser Expr
-expr' = expr <* (get >>= guard . null)
+consumed :: Parser a -> Parser a
+-- expr' = lift (catchE (evalStateT (expr <* (get >>= guard . null))) (const (throwE "parse error...")))
+consumed p = do
+    e <- p
+    s <- get
+    case s of
+        "" -> pure e
+        _  -> lift (throwE "parse error")
 
-parse :: String -> Either ScmErr Expr
-parse = maybe (Left "parse error...") pure . evalStateT expr'
+-- parse :: String -> Either ScmErr Expr
+-- parse = maybe (Left "parse error...") pure . evalStateT expr'
+parse :: String -> ExceptT String IO Expr
+parse = evalStateT (consumed expr)
 
-parseAll :: String -> Either ScmErr [Expr]
-parseAll = maybe (Left "parse error...") pure . evalStateT (some (token expr'))
+-- parseAll :: String -> Either ScmErr [Expr]
+-- parseAll = maybe (Left "parse error...") pure . evalStateT (some (token expr'))
+parseAll :: String -> ExceptT String IO [Expr]
+parseAll = evalStateT (consumed (many (token expr)))
 
 item :: Parser Char
 item = do

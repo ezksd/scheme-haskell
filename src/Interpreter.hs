@@ -34,9 +34,10 @@ getInterpreter = do
 --     where parse' = ReaderT . const . ExceptT . pure .parse
 
 evalAll :: Env -> String -> ExceptT ScmErr IO [Expr]
-evalAll env s =
-    runReaderT (parseAll' s >>= interpretAll) env >>= (lift . unRefs)
-    where parseAll' = ReaderT . const . ExceptT . pure . parseAll
+evalAll env s = 
+    runReaderT (parseAndEval s) env >>= (lift . unRefs)
+    where
+        parseAndEval s' = lift (parseAll s) >>= interpretAll
 
 getEnv :: IO Env
 -- getEnv = primitives >>= (newIORef . Map.fromList) >>= (pure . pure)
