@@ -4,6 +4,7 @@
         '()
         (cons (op (car list))
               (map op (cdr list))))))
+
 (define (append list1 list2)
   (if (null? list1)
       list2
@@ -67,8 +68,3 @@
                      '())))
               pre))
            r8)))))
-
-
-
-                    
-                             

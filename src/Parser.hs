@@ -6,32 +6,21 @@ where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.State.Strict
-import           Control.Monad.Trans.Except
-import           Control.Monad.Trans.Class
-
 import           Data.Char
 import           Scheme
 -- type Parser a = StateT String Maybe a
-type Parser a = StateT String (ExceptT String IO) a
+type Parser a = StateT String Maybe a
 
 consumed :: Parser a -> Parser a
--- expr' = lift (catchE (evalStateT (expr <* (get >>= guard . null))) (const (throwE "parse error...")))
-consumed p = do
-    e <- p
-    s <- get
-    case s of
-        "" -> pure e
-        _  -> lift (throwE "parse error")
+consumed p = p <* (get >>= (guard . null))
 
--- parse :: String -> Either ScmErr Expr
--- parse = maybe (Left "parse error...") pure . evalStateT expr'
-parse :: String -> ExceptT String IO Expr
-parse = evalStateT (consumed expr)
-
--- parseAll :: String -> Either ScmErr [Expr]
--- parseAll = maybe (Left "parse error...") pure . evalStateT (some (token expr'))
-parseAll :: String -> ExceptT String IO [Expr]
-parseAll = evalStateT (consumed (many (token expr)))
+parse :: String -> Maybe Expr
+parse = evalStateT (consumed (expr <* spaces))
+-- parse = evalStateT expr
+parseAll :: String -> Maybe [Expr]
+-- parseAll = evalStateT (consumed (many (spaces *> expr) <* spaces))
+parseAll = evalStateT (many (spaces *> expr) <* spaces)
+-- parseAll = evalStateT (some (token expr))
 
 item :: Parser Char
 item = do
@@ -39,11 +28,8 @@ item = do
     put xs
     return x
 
-test' :: (a -> Bool) -> Parser a -> Parser a
-test' = mfilter
-
 sat :: (Char -> Bool) -> Parser Char
-sat = flip test' item
+sat = flip mfilter item
 
 char :: Char -> Parser Char
 char = sat . (==)
@@ -52,14 +38,17 @@ letter :: Parser String
 letter = many (sat isAlpha)
 
 int :: Parser Int
-int = negate <$> (char '-' >> nat) <|> nat
+int = negate <$> (char '-' *> nat) <|> nat
     where nat = read <$> some (sat isDigit)
 
 notIn :: String -> Parser Char
 notIn = sat . flip notElem
 
+spaces :: Parser ()
+spaces = many (sat isSpace) >> pure ()
+
 token :: Parser a -> Parser a
-token = (>>) spaces where spaces = many $ sat isSpace
+token = (*>) spaces
 
 symbol :: Parser Expr
 symbol = Symbol <$> s where s = some $ notIn " \r\n\"\'#()."

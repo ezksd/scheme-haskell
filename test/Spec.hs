@@ -1,2 +1,3 @@
+import           Interpreter
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = repl

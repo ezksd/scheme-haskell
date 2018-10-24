@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 module Prims
     ( primitives
+    , primitives'
     , unRefs
     )
 where
@@ -8,21 +9,16 @@ import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Data.IORef
 import           Scheme
-
 unRefs :: [IORef a] -> IO [a]
-unRefs = foldr (\ x -> (<*>) ((:) <$> readIORef x)) (pure [])
+unRefs = foldr (\x -> (<*>) ((:) <$> readIORef x)) (pure [])
 
 wrap :: ([Expr] -> Either ScmErr Expr) -> IFunc
-wrap f refs = do
-    ps <- lift (unRefs refs)
-    ExceptT (pure (f ps))
+wrap f = ExceptT . pure . f
 
 numericOp :: (Int -> Int -> Expr) -> IFunc
-numericOp op = wrap
-    (\case
-        [Number a, Number b] -> pure (op a b)
-        _                    -> Left "paramters not match"
-    )
+numericOp op = \case
+    [Number a, Number b] -> pure (op a b)
+    _                    -> throwE "paramters not match"
 
 unaryOp :: (Expr -> Either ScmErr Expr) -> IFunc
 unaryOp op = wrap
@@ -41,16 +37,21 @@ binaryOp op = wrap
 and' :: [Expr] -> Either ScmErr Expr
 and' []            = pure (Bool True)
 and' (Bool b : xs) = if b then and' xs else pure (Bool False)
-and' _             = Left "bot boolean type"
+and' _             = Left "not boolean type"
 
 or' :: [Expr] -> Either ScmErr Expr
 or' []            = pure (Bool True)
 or' (Bool b : xs) = if b then pure (Bool True) else or' xs
 or' _             = Left "bot boolean type"
 
+-- trans :: [(a, IFunc)] -> IO [(a, Expr)]
+-- trans xs = pure ((\(a, b) -> (a, Func b)) <$> xs)
 
-primitives :: IO [(String, IORef Expr)]
-primitives = trans
+primitives' :: [(String, Expr)]
+primitives' = (\(a, b) -> (a, Func b)) <$> primitives
+
+primitives :: [(String, IFunc)]
+primitives =
     [ ("+", caculate (+))
     , ("-", caculate (-))
     , ("*", caculate (*))
@@ -69,6 +70,7 @@ primitives = trans
       , unaryOp
           (\case
               Pair _ _ -> pure (Bool True)
+              _ -> pure (Bool False)
           )
       )
     , ( "null?"
@@ -111,28 +113,20 @@ primitives = trans
           )
       )
     , ( "display"
-      , \xs -> do
-          as <- lift (unRefs xs)
-          case as of
-              [x] -> lift (print x) >> pure (List [])
-              _   -> throwE "parameters not match"
+      , \case
+          [x] -> lift (print x) >> pure (List [])
+          _   -> throwE "parameters not match"
       )
     , ( "newline"
-      , \xs -> do
-            as <- lift (unRefs xs)
-            case as of
-                [] -> lift (putStr "\n") >> pure (List [])
-                _  -> throwE "parameters not match"
+      , \case
+          [] -> lift (putStr "\n") >> pure (List [])
+          _  -> throwE "parameters not match"
       )
     ]
   where
     caculate op = numericOp (\a b -> Number (op a b))
     comp op = numericOp (\a b -> Bool (op a b))
-    trans []            = pure []
-    trans ((k, v) : xs) = do
-        ref <- newIORef (Func v)
-        t   <- trans xs
-        pure ((k, ref) : t)
+
 
 
 

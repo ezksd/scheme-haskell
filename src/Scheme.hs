@@ -1,6 +1,5 @@
 module Scheme where
 import           Control.Monad.Trans.Except
-import           Data.IORef
 import qualified Data.Map.Strict               as Map
 import           Prelude                 hiding ( init
                                                 , lookup
@@ -12,9 +11,8 @@ data Expr = Symbol String
           | Bool Bool
           | List [Expr]
           | Pair Expr Expr
-          | Closure [Expr] [String] Env
+          | Closure [String] [Expr] Env
           | Func IFunc
-
 type ScmErr = String
 
 instance Show Expr where
@@ -30,9 +28,12 @@ instance Show Expr where
     show Closure{} = "function"
     show (Func _) = "primitive"
 
-type IFunc = [IORef Expr] ->  ExceptT ScmErr IO Expr
-type Frame = Map.Map String (IORef Expr)
-type Env = [IORef Frame]
+nil :: Expr
+nil  =  List []
+
+type IFunc = [Expr] ->  ExceptT ScmErr IO Expr
+type Frame = Map.Map String  Expr
+type Env = [Frame]
 
 
 
