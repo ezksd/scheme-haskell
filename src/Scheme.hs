@@ -1,10 +1,7 @@
 module Scheme where
-import           Control.Monad.Trans.Except
+import           Data.IORef
 import qualified Data.Map.Strict               as Map
-import           Prelude                 hiding ( init
-                                                , lookup
-                                                )
-
+import           Control.Monad.Trans.Except
 data Expr = Symbol String
           | String String
           | Number Int
@@ -13,6 +10,8 @@ data Expr = Symbol String
           | Pair Expr Expr
           | Closure [String] [Expr] Env
           | Func IFunc
+          | Void
+
 type ScmErr = String
 
 instance Show Expr where
@@ -27,13 +26,11 @@ instance Show Expr where
     show (Pair a b) = "(" ++ show a ++ " . " ++ show b ++")"
     show Closure{} = "function"
     show (Func _) = "primitive"
+    show Void = mempty
 
 nil :: Expr
-nil  =  List []
+nil = List []
 
 type IFunc = [Expr] ->  ExceptT ScmErr IO Expr
-type Frame = Map.Map String  Expr
-type Env = [Frame]
-
-
+type Env = IORef [Map.Map String Expr]
 
