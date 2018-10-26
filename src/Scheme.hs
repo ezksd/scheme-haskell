@@ -1,6 +1,6 @@
 module Scheme where
 import           Data.IORef
-import qualified Data.Map.Strict               as Map
+import qualified Data.Map.Lazy               as Map
 import           Control.Monad.Trans.Except
 data Expr = Symbol String
           | String String

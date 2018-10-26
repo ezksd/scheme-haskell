@@ -18,8 +18,7 @@ parse :: String -> Maybe Expr
 parse = evalStateT (consumed (expr <* spaces))
 -- parse = evalStateT expr
 parseAll :: String -> Maybe [Expr]
--- parseAll = evalStateT (consumed (many (spaces *> expr) <* spaces))
-parseAll = evalStateT (many (spaces *> expr) <* spaces)
+parseAll = evalStateT (consumed (many (spaces *> expr) <* spaces))
 -- parseAll = evalStateT (some (token expr))
 
 item :: Parser Char
@@ -51,7 +50,7 @@ token :: Parser a -> Parser a
 token = (*>) spaces
 
 symbol :: Parser Expr
-symbol = Symbol <$> s where s = some $ notIn " \r\n\"\'#()."
+symbol = Symbol <$> s where s = some $ notIn " \r\n\"\',#()."
 
 string :: Parser Expr
 string = String <$> (char '"' *> letter <* char '"')
@@ -69,6 +68,10 @@ list :: Parser Expr
 list = List <$> (char '(' *> x <* token (char ')'))
     where x = many $ token expr
 
+listLiteral :: Parser Expr
+listLiteral = List <$> ((:) <$> (char '(' *> expr) <*> (rest <* char ')'))
+    where rest = many (char ',' *> expr)
+
 pair :: Parser Expr
 pair = Pair <$> left <*> right
   where
@@ -79,5 +82,5 @@ quote :: Parser Expr
 quote = (\e -> List [Symbol "quote", e]) <$> (char '\'' *> expr)
 
 expr :: Parser Expr
-expr = string <|> bool <|> number <|> symbol <|> list <|> pair <|> quote
+expr = string <|> bool <|> number <|> symbol <|> listLiteral <|> list <|> pair <|> quote
 

@@ -3,7 +3,6 @@ module Prims (primitives)
 where
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
-import           Data.IORef
 import           Scheme
 
 wrap :: ([Expr] -> Either ScmErr Expr) -> IFunc
