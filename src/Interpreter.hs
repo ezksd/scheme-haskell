@@ -26,7 +26,7 @@ repl = do
     ref     <- newIORef [Map.fromList primitives]
     runReaderT (repl' content) ref
     runReaderT loop            ref
-    where loop = lift (putStrLn ">") >> lift getLine >>= repl' >> loop
+    where loop = lift (putStr "> ") >> lift getLine >>= repl' >> loop
 
 repl' :: String -> ReaderT Env IO ()
 repl' s = do
@@ -56,8 +56,9 @@ interpret (Symbol x) = lookup x
 interpret (List   x) = case x of
     Symbol "define" : List (Symbol f : xs) : body ->
         ask >>= define f . Closure (unSymbols xs) body
-    [Symbol "set!", Symbol k, v]     -> interpret v >>= define k
     Symbol "lambda" : List xs : body -> Closure (unSymbols xs) body <$> ask
+    Symbol "let" : List binding : body -> extract binding >>= ((ask >>= readRef >>=) . (newRef .) . (:) . Map.fromList) >>= ((`local` interpretBody body) . const)
+    [Symbol "set!", Symbol k, v]     -> interpret v >>= define k
     [Symbol "define", Symbol k, v]   -> interpret v >>= define k
     [Symbol "quote", e]              -> pure e
     [Symbol "if", p, v1, v2]         -> do
@@ -72,13 +73,14 @@ interpret (List   x) = case x of
             _           -> lift (throwE "not a function")
   where
     interpretBody = (last <$>) . interpretAll
-    unSymbols xs =
-        (\case
-                (Symbol input) -> input
-            )
-            <$> xs
+    unSymbols = ((\case (Symbol input) -> input) <$>)
     unBool (Bool b) = b
     unBool  _       = False
+    extract []                        = pure []
+    extract (List [Symbol s, v] : xs) = do
+        e  <- interpret v
+        es <- extract xs
+        pure ((s, e) : es)
 interpret x = pure x
 
 
