@@ -7,35 +7,29 @@ import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Scheme
-
-wrap :: ([Expr] -> Either ScmErr Expr) -> IFunc
-wrap f = ExceptT . pure . f
+import           System.IO.Unsafe
 
 numericOp :: (Int -> Int -> Expr) -> IFunc
 numericOp op = \case
     [Number a, Number b] -> pure (op a b)
-    _                    -> throwE "paramters not match"
+    _                    -> Left "paramters not match"
 
-unaryOp :: (Expr -> Either ScmErr Expr) -> IFunc
-unaryOp op = wrap
-    (\case
-        [x] -> op x
-        _   -> Left "paramters not match"
-    )
+unaryOp :: (Expr -> Either String Expr) -> IFunc
+unaryOp op = \case
+    [x] -> op x
+    _   -> Left "paramters not match"
 
-binaryOp :: (Expr -> Expr -> Either ScmErr Expr) -> IFunc
-binaryOp op = wrap
-    (\case
-        [a, b] -> op a b
-        _      -> Left "paramters not match"
-    )
+binaryOp :: (Expr -> Expr -> Either String Expr) -> IFunc
+binaryOp op = \case
+    [a, b] -> op a b
+    _      -> Left "paramters not match"
 
-and' :: [Expr] -> Either ScmErr Expr
+and' :: [Expr] -> Either String Expr
 and' []            = pure (Bool True)
 and' (Bool b : xs) = if b then and' xs else pure (Bool False)
 and' _             = Left "not boolean type"
 
-or' :: [Expr] -> Either ScmErr Expr
+or' :: [Expr] -> Either String Expr
 or' []            = pure (Bool True)
 or' (Bool b : xs) = if b then pure (Bool True) else or' xs
 or' _             = Left "bot boolean type"
@@ -51,25 +45,19 @@ primitives =
             , ("=", comp (==))
             , ("<", comp (<))
             , ( "list?"
-              , unaryOp
-                  (\case
-                      List _ -> pure (Bool True)
-                      _      -> pure (Bool False)
-                  )
+              , \case
+                  [List _] -> pure (Bool True)
+                  _        -> pure (Bool False)
               )
             , ( "pair?"
-              , unaryOp
-                  (\case
-                      Pair _ _ -> pure (Bool True)
-                      _        -> pure (Bool False)
-                  )
+              , \case
+                  [Pair _ _] -> pure (Bool True)
+                  _          -> pure (Bool False)
               )
             , ( "null?"
-              , unaryOp
-                  (\case
-                      List [] -> pure (Bool True)
-                      _       -> pure (Bool False)
-                  )
+              , \case
+                  [List x] -> pure (Bool (null x))
+                  _        -> Left "not a list"
               )
             , ( "car"
               , unaryOp
@@ -88,23 +76,23 @@ primitives =
                   )
               )
             , ( "cons"
-              , binaryOp
-                  (\a b -> case b of
-                      List bs -> pure (List (a : bs))
-                      _       -> pure (Pair a b)
-                  )
-              )
-            , ( "foldr"
               , \case
-                  [Func f, x, List xs] -> foldM (\a b -> f [a, b]) x xs
-                  _                    -> throwE "parameters not match"
+                  [x, List xs] -> pure (List (x : xs))
+                  [a, b      ] -> pure (Pair a b)
+                  _            -> Left "illegal parameter"
+              )
+            , ( "range"
+              , \case
+                  [Number a, Number b] | a < b ->
+                      pure (List (Number <$> [a .. b]))
+                  _ -> Left "wrone parameter1"
               )
             , ( "reverse"
               , \case
                   [List xs] -> pure (List (reverse xs))
               )
-            , ("and", wrap and')
-            , ("or" , wrap or')
+            , ("and", and')
+            , ("or" , or')
             , ( "not"
               , unaryOp
                   (\case
@@ -112,21 +100,10 @@ primitives =
                       _      -> Left "not boolean type"
                   )
               )
-            , ( "display"
-              , \case
-                  [x] -> lift (print x) >> pure (List [])
-                  _   -> throwE "parameters not match"
-              )
-            , ( "newline"
-              , \case
-                  [] -> lift (putStr "\n") >> pure (List [])
-                  _  -> throwE "parameters not match"
-              )
             ]
   where
     caculate op = numericOp (\a b -> Number (op a b))
     comp op = numericOp (\a b -> Bool (op a b))
-
 
 
 

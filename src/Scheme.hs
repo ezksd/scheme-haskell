@@ -8,11 +8,10 @@ data Expr = Symbol String
           | Bool Bool
           | List [Expr]
           | Pair Expr Expr
+          | Lazy Expr
           | Closure [String] [Expr] Env
           | Func IFunc
           | Void
-
-type ScmErr = String
 
 instance Show Expr where
     show (Symbol s) = "variable:" ++ s
@@ -31,6 +30,6 @@ instance Show Expr where
 nil :: Expr
 nil = List []
 
-type IFunc = [Expr] ->  ExceptT ScmErr IO Expr
-type Env = IORef [Map.Map String Expr]
+type IFunc = [Expr] ->  Either String Expr
+type Env = [Map.Map String Expr]
 

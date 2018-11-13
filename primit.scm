@@ -1,40 +1,35 @@
-(define map
-  (lambda (op list)
-    (if (null? list)
-        '()
-        (cons (op (car list))
-              (map op (cdr list))))))
+(define (id x) x)
+
+(define (map op xs)
+  (foldr (lambda (a b)
+           (cons (op a) b))
+         '()
+         xs))
               
-(define (append list1 list2)
-  (if (null? list1)
-      list2
-      (cons (car list1) (append (cdr list1) list2))))              
+(define (append l1 l2)
+  (foldr (lambda (a b)
+                 (cons a b))
+         l2
+         l1))  
 
-(define flatmap
-  (lambda (f xs)
-    (if (null? xs)
-        '()
-        (append (f (car xs))
-                (flatmap f (cdr xs))))))              
+(define (flatmap f xs1)
+  (foldr (lambda (a b)
+           (append (f a) b))
+         '()
+         xs1))
 
-(define filter
-  (lambda (pred l)
-    (cond ((null? l) '())
-          ((pred (car l)) (cons (car l) (filter pred (cdr l))))
-          (else
-           (filter pred (cdr l))))))
+(define (filter p xs)
+  (foldr (lambda (a b)
+           (if (p a)
+               (cons a b)
+               b))
+         xs))
 
-(define range
-  (lambda (a b)
-    (if (> a b)
-        '()
-        (cons a (range (+ a 1) b)))))
-
-(define length
-    (lambda (l)
-        (if (null? l)
-            0
-            (+ 1 (length (cdr l))))))
+(define (length xs)
+  (foldr (lambda (a b)
+           (+ b 1))
+         0
+         xs))
 
 (define test
   (lambda (n xs gap)
@@ -51,20 +46,17 @@
 
 (define r8 (range 1 8))
 
-(define queens
-  (lambda (n)
-    (if (= n 0)
-        '(())
-        (let ((pre (queens (- n 1))))
-          (flatmap
-           (lambda (x)
-             (flatmap
-              (lambda (xs)
-                (map
-                 (lambda (nobodycares)
-                   (cons x xs))
-                 (if (test0 x xs)
-                     '(())
-                     '())))
-              pre))
-           r8)))))
+(define (queens pre)
+  (flatmap (lambda (x1)
+             (flatmap (lambda (xs)
+                        (if (test0 x1 xs)
+                            (cons (cons x1 xs) '())
+                            '()))
+                      pre))
+           r8))
+
+(define q8
+  (foldr (lambda (a b)
+           (queens b))
+         '(())
+         r8))
