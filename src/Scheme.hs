@@ -23,13 +23,14 @@ instance Show Expr where
               f [x]    = show x ++ ")"
               f (x:xs) = show x ++ "," ++ f xs
     show (Pair a b) = "(" ++ show a ++ " . " ++ show b ++")"
+    show (Lazy _) = "lazey value"
     show Closure{} = "function"
     show (Func _) = "primitive"
-    show Void = mempty
+    show Void = "ee"
 
 nil :: Expr
 nil = List []
 
-type IFunc = [Expr] ->  Either String Expr
-type Env = [Map.Map String Expr]
+type IFunc = [Expr] ->  ExceptT String IO Expr 
+type Env = [IORef (Map.Map String Expr)]
 

@@ -3,36 +3,33 @@ module Prims
     ( primitives
     )
 where
-import           Control.Monad
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
 import           Scheme
-import           System.IO.Unsafe
 
 numericOp :: (Int -> Int -> Expr) -> IFunc
 numericOp op = \case
     [Number a, Number b] -> pure (op a b)
-    _                    -> Left "paramters not match"
+    _                    -> throwE "paramters not match"
 
 unaryOp :: (Expr -> Either String Expr) -> IFunc
 unaryOp op = \case
-    [x] -> op x
-    _   -> Left "paramters not match"
+    [x] -> ExceptT (pure (op x))
+    _   -> throwE "paramters not match"
 
-binaryOp :: (Expr -> Expr -> Either String Expr) -> IFunc
-binaryOp op = \case
-    [a, b] -> op a b
-    _      -> Left "paramters not match"
+-- binaryOp :: (Expr -> Expr -> Either String Expr) -> IFunc
+-- binaryOp op = \case
+--     [a, b] -> ExceptT (pure (op a b))
+--     _      -> throwE "paramters not match"
 
-and' :: [Expr] -> Either String Expr
+and' :: [Expr] -> ExceptT String IO Expr
 and' []            = pure (Bool True)
 and' (Bool b : xs) = if b then and' xs else pure (Bool False)
-and' _             = Left "not boolean type"
+and' _             = throwE "not boolean type"
 
-or' :: [Expr] -> Either String Expr
+or' :: [Expr] -> ExceptT String IO Expr
 or' []            = pure (Bool True)
 or' (Bool b : xs) = if b then pure (Bool True) else or' xs
-or' _             = Left "bot boolean type"
+or' _             = throwE "bot boolean type"
 
 primitives :: [(String, Expr)]
 primitives =
@@ -57,7 +54,7 @@ primitives =
             , ( "null?"
               , \case
                   [List x] -> pure (Bool (null x))
-                  _        -> Left "not a list"
+                  _        -> throwE "not a list"
               )
             , ( "car"
               , unaryOp
@@ -79,17 +76,18 @@ primitives =
               , \case
                   [x, List xs] -> pure (List (x : xs))
                   [a, b      ] -> pure (Pair a b)
-                  _            -> Left "illegal parameter"
+                  _            -> throwE "illegal parameter"
               )
             , ( "range"
               , \case
                   [Number a, Number b] | a < b ->
                       pure (List (Number <$> [a .. b]))
-                  _ -> Left "wrone parameter1"
+                  _ -> throwE "illegal parameter"
               )
             , ( "reverse"
               , \case
                   [List xs] -> pure (List (reverse xs))
+                  _ ->  throwE "illegal parameter"
               )
             , ("and", and')
             , ("or" , or')
@@ -104,7 +102,3 @@ primitives =
   where
     caculate op = numericOp (\a b -> Number (op a b))
     comp op = numericOp (\a b -> Bool (op a b))
-
-
-
-

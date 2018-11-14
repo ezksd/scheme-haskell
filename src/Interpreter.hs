@@ -4,11 +4,14 @@ module Interpreter
     ( repl
     )
 where
+import           Data.IORef
+import           Control.Monad.Ref
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.State.Strict
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Except
+import           Control.Monad.Trans.Maybe
 import           Paths_scheme
 import qualified Data.Map.Strict               as Map
 import           Parser
@@ -19,31 +22,25 @@ import           Prims
 import           Scheme
 import           System.IO
 import           System.IO.Error
-import           System.IO.Unsafe
 
-type Interpreter a = StateT Env (Either String) a
+type Interpreter a = StateT Env (ExceptT String IO) a
 
 repl :: IO ()
 repl = do
     putStrLn "press Ctrl+D to quit."
-    env <-
-        getDataFileName "primit.scm"
-        >>= readFile
-        >>= (`repl'` [Map.fromList primitives])
-    catchIOError
-        (loop "" env)
-        (\e -> if
-            | isEOFError e -> putStrLn "bye ~"
-            | otherwise    -> ioError e
-        )
+    ref <- newIORef (Map.fromList primitives)
+    env <- getDataFileName "primit.scm" >>= readFile >>= (`repl'` [ref])
+    catchIOError (loop "" env) (\e -> if isEOFError e then putStrLn "bye~" else ioError e)
 
 repl' :: String -> Env -> IO Env
-repl' s env = case runStateT parseAndEval env of
-    Left  e      -> putStrLn e >> pure env
-    Right (a, s) -> putStr (format a) >> pure s
+repl' s env = do
+    x <- runExceptT (runStateT parseAndEval env)
+    case x of
+        Left  e      -> putStrLn e >> pure env
+        Right (a, env') -> putStr (format a) >> pure env'
   where
     parseAndEval =
-        maybe (lift (Left "parse error")) pure (parseAll s) >>= interpretAll
+        maybe (lift (throwE "parse error")) pure (parseAll s) >>= interpretAll
     format = (>>= format')
     format' Void = ""
     format' x    = show x ++ "\n"
@@ -58,54 +55,53 @@ loop s env = do
            | otherwise -> putStrLn "illgal input" >> loop "" env
   where
     space 0 xs = xs
-    space n xs = space (n - 1) ("    " ++ xs)
+    space a xs = space (a - 1) ("    " ++ xs)
+    n      = count s
     indent = if
-        | n == 0    -> "> "
-        | n > 0     -> space n []
+        | n == zero    -> "> "
+        | n > zero     -> space n []
         | otherwise -> "illegal input"
     count  = foldr
-        (\x n -> case x of
-            '(' -> n + 1
-            ')' -> n - 1
-            _   -> n
+        (\a b -> case a of
+            '(' -> b + 1
+            ')' -> b - 1
+            _   -> b
         )
         0
-    n      = count s
+zero :: Integer
+zero = 0
 
 throw :: String -> Interpreter a
-throw = lift . Left
+throw = lift . throwE
 
 define :: String -> Expr -> Interpreter ()
-define k v = modify (\(x : xs) -> Map.insert k v x : xs)
+define k v = head <$> get >>= (`modifyRef` Map.insert k v)
 
 update :: String -> Expr -> Interpreter ()
-update k v = get >>= update' []
+update = ((get >>=) .) . update'
   where
-    update' _   []       = throw ("unbounded identifer :" ++ k)
-    update' pre (x : xs) = if
-        | Map.member k x -> put (reverse pre ++ (Map.insert k v x : xs))
-        | otherwise      -> update' (x : pre) xs
+    update' k _ []       = throw ("unbounded identifer :" ++ k)
+    update' k v (x : xs) = do
+        env <- readRef x
+        if Map.member k env
+            then modifyRef x (Map.insert k v)
+            else update' k v xs
 
 lookup :: String -> Interpreter Expr
-lookup k = do 
-    env  <- get
-    lift ( maybe (err env) pure  (lookup' env))
+lookup k = do
+    env <- get
+    lift $ maybeToExceptT ("unbounded identifer :" ++ k) (lookup' env)
   where
-    err  e   = Left ("unbounded identifer :" ++ k ++ show e)
-    lookup' = foldr ((<|>) . Map.lookup k) empty
+    lookup' []       = empty
+    lookup' (x : xs) = do
+        m <- lift (readIORef x)
+        maybe empty pure (Map.lookup k m) <|> lookup' xs
 
 push :: [(String, Expr)] -> Interpreter ()
-push = modify . (:) . Map.fromList
+push xs = newRef (Map.fromList xs) >>= (modify . (:))
 
 pop :: Interpreter ()
 pop = modify tail
-
-merge :: [a] -> [a] -> [a]
-merge a b = merge' [] (reverse a) (reverse b)
-  where
-    merge' t []       _        = t
-    merge' t xs       []       = reverse xs ++ t
-    merge' t (_ : xs) (y : ys) = merge' (y : t) xs ys
 
 interpret :: Expr -> Interpreter Expr
 interpret (Symbol x) = lookup x
@@ -113,42 +109,50 @@ interpret (List   x) = case x of
     Symbol "define" : List (Symbol f : xs) : body ->
         get >>= define f . Closure (unSymbols xs) body >> pure Void
     Symbol "lambda" : List xs : body -> Closure (unSymbols xs) body <$> get
-    -- Symbol "let" : List binding : body ->
-    --     (extract binding >>= push) *> interpretBody body <* pop
+    Symbol "let" : List binding : body ->
+        (extract binding >>= push) *> interpretBody body <* pop
     [Symbol "set!"  , Symbol k, v] -> interpret v >>= update k >> pure Void
     [Symbol "define", Symbol k, v] -> interpret v >>= define k >> pure Void
     [Symbol "quote", e]            -> pure e
     [Symbol "if", p, v1, v2]       -> do
-        (Bool b) <- interpret p
-        interpret (if b then v1 else v2)
+        -- (Bool b) <- interpret p
+        x' <- interpret p
+        case x' of
+            (Bool b) -> interpret (if b then v1 else v2)
+            _ -> throw "not a bool"
     (Symbol "foldr" : xs)          -> do
-        [op, init, List xs'] <- interpretAll xs
-        foldM (\b a -> interpret (List [op, Lazy a, Lazy b])) init (reverse xs')
+        x' <- interpretAll xs
+        case x' of
+            [op, init, List xs'] -> foldM (\b a -> interpret (List [op, Lazy a, Lazy b])) init (reverse xs')
+            _ -> throw "illegal parameter"
     xs                             -> do
         (h : params) <- interpretAll xs
         case h of
-            (Closure ps body env') -> push (zip ps params) *> interpretBody body <* pop
-            (Func func           ) -> lift (func params)
-            _                      -> lift (Left "not a function")
+            (Closure ps body env') -> do
+                env <- get
+                put env'
+                push (zip ps params)
+                e <- interpretBody body
+                put env
+                pure e
+            (Func func) -> lift (func params)
+            _           -> throw "not a function"
   where
     interpretBody = (last <$>) . interpretAll
-    unSymbols =
-        ((\case
-             (Symbol input) -> input
-         ) <$>
-        )
+    unSymbols = ((\case (Symbol input) -> input) <$>)
     extract []                        = pure []
     extract (List [Symbol s, v] : xs) = do
         e  <- interpret v
         es <- extract xs
         pure ((s, e) : es)
+    extract _ = throw "illegal parameters"
 interpret (Lazy y) = pure y
 interpret x        = pure x
 
 interpretAll :: [Expr] -> Interpreter [Expr]
 -- interpretAll = traverse interpret
-interpretAll [] = pure []
-interpretAll (x:xs) = do
-    x' <- interpret x
+interpretAll []       = pure []
+interpretAll (x : xs) = do
+    x'  <- interpret x
     xs' <- interpretAll xs
     pure (x' : xs')
