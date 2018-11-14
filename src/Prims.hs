@@ -5,7 +5,7 @@ module Prims
 where
 import           Control.Monad.Trans.Except
 import           Scheme
-
+import           Control.Monad.IO.Class
 numericOp :: (Int -> Int -> Expr) -> IFunc
 numericOp op = \case
     [Number a, Number b] -> pure (op a b)
@@ -55,6 +55,11 @@ primitives =
               , \case
                   [List x] -> pure (Bool (null x))
                   _        -> throwE "not a list"
+              )
+            , ( "disply"
+              , \case
+                [String s] -> liftIO (putStr s) >> pure Void
+                _ -> throwE "not a string"
               )
             , ( "car"
               , unaryOp

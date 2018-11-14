@@ -34,7 +34,7 @@ char :: Char -> Parser Char
 char = sat . (==)
 
 letter :: Parser String
-letter = many (sat isAlpha)
+letter = many (sat (\x -> isAlpha x || isDigit x))
 
 int :: Parser Int
 int = negate <$> (char '-' *> nat) <|> nat

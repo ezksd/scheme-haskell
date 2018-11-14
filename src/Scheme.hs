@@ -26,7 +26,7 @@ instance Show Expr where
     show (Lazy _) = "lazey value"
     show Closure{} = "function"
     show (Func _) = "primitive"
-    show Void = "ee"
+    show Void = "void"
 
 nil :: Expr
 nil = List []
